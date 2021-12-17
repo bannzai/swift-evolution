@@ -150,6 +150,13 @@ func test_distributedTokenRange() async throws {}
 }
 ```
 
+During this proposal, we will be using the following phrases which have well-defined meanings, so in order to avoid confusion, let us define them explicitly up-front:
+
+- _distributed actor type_ - any `distributed actor` declaration, or `protocol` declaration that also conforms to `DistributedActor` because they can only be implemented by specific distributed actors, e.g. `protocol Worker: DistributedActor` as well as `distributed actor Worker`, both, can be referred to as "distributed actor type"
+- _distributed actor reference_ - any variable, or parameter refering to a distributed actor instance (regardless if remote or local),
+- _known-to-be-local distributed actor_, or "_distributed local actor_" for short - a specific known to be local instance of a distributed actor. A distributed actor reference can be checked at runtime if it is remote or local, but in certain situations it is also known in the type system that an actor is "definitely local" and not all isolation checks need to be applied,
+- "_distributed remote actor_" - an instance of a distributed actor type, that is actually "remote" and therefore does not have any storage allocated and effectively functions like a "proxy" object. This state does not exist anywhere explicitly in the type-system explicitly, and is what we assume every distributed actor is, unless proven to be "known to be local".
+
 Keeping this in mind, let us proceed to discussing the specific isolation rules of distributed actors.
 
 ## Proposed solution
