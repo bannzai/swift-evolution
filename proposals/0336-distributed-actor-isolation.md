@@ -288,7 +288,7 @@ distributed actor Player {
 
 Unless otherwise specified in this proposal, the semantics of a distributed actor are the same as a regular actor, as described in [SE-0306](https://github.com/apple/swift-evolution/blob/main/proposals/0306-actors.md).
 
-### Distributed Actors and Distributed Actor Systems
+### Distributed Actors 
 
 Distributed actors can only be declared using the `distributed actor` keywords. Such types automatically conform to the `DistributedActor` protocol. The protocol is defined in the `_Distributed` module as follows:
 
@@ -313,7 +313,8 @@ protocol DistributedActor: AnyActor, Identifiable, Hashable
   where ID == ActorSystem.ActorID {
     
   /// Type of the distributed actor system this actor is able to operate with.
-  /// It can be a type erased, or existential actor system if the actor is able to work with different ones.
+  /// It can be a type erased, or existential actor system (through a type-eraser wrapper type),
+  /// if the actor is able to work with different ones.
   associatedtype ActorSystem: DistributedActorSystem
   
   /// The serialization requirement to apply to all distributed declarations inside the actor.
@@ -337,6 +338,44 @@ protocol DistributedActor: AnyActor, Identifiable, Hashable
 All distributed actors are *explicitly* part of some specific distributed actor system. The term "actor system" originates from both early, and current terminology relating to actor runtimes and loosely means "group of actors working together", which carries a specific meaning for distributed actors, because it implies they must be able to communicate over some (network or ipc) protocol they all understand. In Swift's local-only actor model, the system is somewhat implicit, because it simply is "the runtime", as all local objects can understand and invoke each other however they see fit. In distribution this needs to become a little more specific: there can be different network protocols and "clusters" to which actors belong, and as such, they must be explicit about their actor system use. We feel this is an expected and natural way to introduce the concept of actor systems only once we enter distribution, because previously (in local only actors) the concept would not have added much value, but in distribution it is the *core* of everything distributed actors do.
 
 The protocol also includes two nonisolated property requirements: `id` and `actorSystem`. Witnesses for these requirements are nonisolated computed properties that the compiler synthesizes in specific distributed actor declarations. They store the actor system the actor was created with, and its id, which is crucial to its lifecycle and messaging capabilities. We will not discuss in depth how the id is assigned in this proposal, but in short: it is created and assigned by the actor system during the actor's initialization.
+
+Note, that the `DistributedActor` protocol does *not* refine the `Actor` protocol, but instead it refines the `AnyActor` protocol, also introduced in this proposal. This detail is very important to upholding the soundness of distributed actor isolation. 
+
+Sadly, just refining the Actor protocol results in the following unsound isolation behavior: 
+
+```swift
+// Illustrating isolation violation, IF 'DistributedActor' were to refine 'Actor':
+extension Actor {
+  func f() -> SomethingSendable { ... }
+}
+func g<A: Actor>(a: A) async {
+  print(await a.f())
+}
+
+// given any distributed actor:
+actor MA: DistributedActor {} // : Actor implicitly (not proposed, for illustration purposes only)
+
+func h(ma: MA) async {
+  await g(ma) // 💥 would be allowed because a MA is an Actor, but can't actually work at runtime 
+}
+```
+
+The general issue here is that a distributed actor type must uphold its isolation guarantees, because the actual instance of such type may be remote, and therefore cannot be allowed to have non-distributed calls made on it. One could argue for the inverse relationship, that `Actor: DistributedActor` as the Actor is more like "`LocalActor`", however this idea also breaks down rather quickly, as one would expect "any IS-A distributed actor type, to have distributed actor isolation", however we definitely would NOT want `actor Worker {}` suddenly exhibit distributed actor isolation. In a way, this way of inheritance breaks the substitution principle in weird ways which could be hacked together to make work, but feel fragile and would lead to hard to understand isolation issues.
+
+In order to prevent this hole in the isolation model, we must prevent `DistributedActor` from being downcast to `Actor` and the most natural way of doing so, is introducing a shared super-type for the two Actor-like types: `AnyActor`.
+
+```swift
+@_marker
+@available(SwiftStdlib 5.6, *)
+public protocol AnyActor: Sendable, AnyObject {}
+
+public protocol Actor: AnyActor { ... }
+public protocol DistributedActor: AnyActor, ... { ... }
+```
+
+Thanks to this protocol we gain an understandable, and complete, type hierarchy for all actor-like behaviors, that is, types that perform a kind of isolation checking and guarantee data-race freedom to invocations on them by serializing them through an actor mailbox. This does not incur much implementation complexity in practice because functionality wise, distributed actors mirror actors exactly, however their customization of e.g. executors only applies to local instances.
+
+## Distributed Actor Systems
 
 Libraries aiming to implement distributed actor systems, and act as the runtime for distributed actors must implement the `DistributedActorSystem`. We will expand the definition of this protocol with important lifecycle functions in the runtime focused proposal, however for now let us focus on its aspects which affect type checking and isolation of distributed actors. The protocol is defined as:
 
