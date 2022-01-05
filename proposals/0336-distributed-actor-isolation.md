@@ -1725,6 +1725,29 @@ Summing up, the primary benefit of the implicit `distributed func` rule was to a
 
 We gave this alternative design idea significant thought and strongly favor the explicit distributed rule.
 
+### Declaring actors and methods as "`distributable`"
+
+
+
+### Unconditionally conforming `DistributedActor` to `Codable`
+
+This was part of an earlier design, where the distributed actor protocol was declared as:
+
+```swift
+protocol DistributedActor: AnyActor, Sendable, Codable, ... { ... }
+```
+
+forcing all implementations of distributed actors to implement the Codable `init(from:)` initializer and `encode(to:)` method. 
+
+While we indeed to expect `Codable` to play a large role in some distributed actor implementations, we have specific use-cases in mind where:
+
+- Codable might not be used _at all_, thus the re-design and strong focus on being serialization mechanism agnostic in the proposal, by introducing the `SerializationRequirement` associated type.
+- Some distributed actor runtimes may behave more like "services" which are _not_ meant to be "passed around" to other nodes. This capability has been explicitly requested by some early adopters in IPC scenarios, where it will help to clean up vague and hacky solutions today, with a clear model where some distributed actors are Codable and thus "pass-around-able" and some are not, depending on the specifics how they were created.
+
+As such, we are left with no other implementation approach other than the implicit conformance, because it is not possible to add the `Codable` conformance to types managed by a distributed actor system that _wants to_ make distributed actors Codable otherwise (i.e. it is not possible to express `extension DistributedActor: Codable where ID: Codable {}` in today's Swift). Alternative approaches force implementations into casting and doing unsafe tricksy and lose out on the type-safety of only passing Codable actors to distributed methods.
+
+For distributed actor systems which _do not_ use `Codable`, forcing them to implement Codable methods and initializers would be quite a problem and the implementations would likely be implemented as just crashing. Implementations may force actors to conform to some other protocol, like `IPCServiceDistributedActor` which conforms to the `SerializationRequirement` and attempts to initialize an actor which does not conform to this protocol can crash eagerly, at initialization time. This way actor system authors gain the same developer experience as using `Codable` for passing distributed actors through distributed methods, but the initialization can be specialized -- as it is intended to, because libraries may require specific things from actor types after all.
+
 ### Introducing "wrapper" type for `Distributed<SomeActor>`
 
 We did consider (and have implemented, assisted by swift-syntax based source-generation) the idea of wrapping distributed actors using some "wrapper" type, that would delegate calls to all distributed functions, but prevent access to e.g. stored properties wrapped by such instance. 
