@@ -1328,58 +1328,6 @@ protocol Arnold: Worker {
 
 This witness works properly, because the `distributed func` requirement in the protocol is always going to be `async throws` due to the `distributed func`'s effect on the declaration. Therefore the declaration "inside the actor" can make use of `async` or `throws` without changing how the protocol can be used.
 
-### Breaking through Location Transparency
-
-Programs based on distributed actors should always be written to respect location transparency, but sometimes it is useful to break through that abstraction. The most common situation where breaking through location transparency can be useful is when writing unit tests. Such tests may need to inspect state, or call non-distributed methods, of a distributed actor instance that is known to be local.
-
-To support this kind of niche circumstance, all distributed actors offer a `whenLocal` method, which executes a provided closure based on whether it is a local instance:
-
-```swift
-extension DistributedActor {
-  /// Runs the 'body' closure if and only if the passed 'actor' is a local instance.
-  /// 
-  /// Returns `nil` if the actor was remote.
-  @discardableResult
-  nonisolated func whenLocal<T>(
-    _ body: (isolated Self) async throws -> T
-  ) async rethrows -> T?
-
-  /// Runs the 'body' closure if and only if the passed 'actor' is a local instance.
-  /// 
-  /// Invokes the 'else' closure if the actor instance was remote.
-  @discardableResult
-  nonisolated func whenLocal<T>(
-    _ body: (isolated Self) async throws -> T,  
-    else whenRemote: (Self) async throws -> T
-  ) async rethrows -> T 
-```
-
-When the instance is local, the `whenLocal` method exposes the distributed actor instance to the provided closure, as if it were a regular actor instance. This means you can invoke non-distributed methods when the actor instance is local, without relying on hacks that would trigger a crash if invoked on a remote instance.
-
-> **Note:** We would like to explore a slightly different shape of the `whenLocal` functions, that would allow _not_ hopping to the actor unless necessary, however we are currently lacking the implementation ability to do so. So this proposal for now shows the simple, `isolated` based approach. The alternate API we are considering would have the following shape:
->
-> ```swift
-> @discardableResult
-> nonisolated func whenLocal<T>(
->  _ body: (local Self) async throws -> T
-> ) reasync rethrows -> T?
-> ```
->
-> This API could enable us to treat such `local DistActor` exactly the same as a local-only actor type; We could even consider allowing nonisolated stored properties, and allow accessing them synchronously like that:
->
-> ```swift
-> // NOT part of this proposal, but a potential future direction
-> distributed actor FamousActor { 
->   let name: String = "Emma"
-> }
-> 
-> FamousActor().whenLocal { fa /*: local FamousActor*/ in
->   fa.name // OK, known to be local, distributed-isolation does not apply
-> }
-> ```
->
-> 
-
 ## Future Directions
 
 ### Versioning and Evolution of Distributed Actors and Methods
@@ -1482,7 +1430,57 @@ distributed func greet(
 
 During the initial handshake peers in a distributed system exchange information about their runtime version, and this can be used to inform method lookups, or even reject "too old" clients. 
 
-### Introducing the `local` keyword
+### Breaking through Location Transparency
+
+Programs based on distributed actors should always be written to respect location transparency, but sometimes it is useful to break through that abstraction. The most common situation where breaking through location transparency can be useful is when writing unit tests. Such tests may need to inspect state, or call non-distributed methods, of a distributed actor instance that is known to be local.
+
+To support this kind of niche circumstance, all distributed actors offer a `whenLocal` method, which executes a provided closure based on whether it is a local instance:
+
+```swift
+extension DistributedActor {
+  /// Runs the 'body' closure if and only if the passed 'actor' is a local instance.
+  /// 
+  /// Returns `nil` if the actor was remote.
+  @discardableResult
+  nonisolated func whenLocal<T>(
+    _ body: (isolated Self) async throws -> T
+  ) async rethrows -> T?
+
+  /// Runs the 'body' closure if and only if the passed 'actor' is a local instance.
+  /// 
+  /// Invokes the 'else' closure if the actor instance was remote.
+  @discardableResult
+  nonisolated func whenLocal<T>(
+    _ body: (isolated Self) async throws -> T,  
+    else whenRemote: (Self) async throws -> T
+  ) async rethrows -> T 
+```
+
+When the instance is local, the `whenLocal` method exposes the distributed actor instance to the provided closure, as if it were a regular actor instance. This means you can invoke non-distributed methods when the actor instance is local, without relying on hacks that would trigger a crash if invoked on a remote instance.
+
+> **Note:** We would like to explore a slightly different shape of the `whenLocal` functions, that would allow _not_ hopping to the actor unless necessary, however we are currently lacking the implementation ability to do so. So this proposal for now shows the simple, `isolated` based approach. The alternate API we are considering would have the following shape:
+>
+> ```swift
+> @discardableResult
+> nonisolated func whenLocal<T>(
+> _ body: (local Self) async throws -> T
+> ) reasync rethrows -> T?
+> ```
+>
+> This API could enable us to treat such `local DistActor` exactly the same as a local-only actor type; We could even consider allowing nonisolated stored properties, and allow accessing them synchronously like that:
+>
+> ```swift
+> // NOT part of this proposal, but a potential future direction
+> distributed actor FamousActor { 
+> let name: String = "Emma"
+> }
+> 
+> FamousActor().whenLocal { fa /*: local FamousActor*/ in
+> fa.name // OK, known to be local, distributed-isolation does not apply
+> }
+> ```
+
+## Introducing the `local` keyword
 
 It would be possible to expand the way distributed actors can conform to protocols which are intended only for the actor's "local side" if we introduced a `local` keyword. It would be used to taint distributed actor variables as well as functions in protocols with a local bias.
 
@@ -1727,7 +1725,9 @@ We gave this alternative design idea significant thought and strongly favor the 
 
 ### Declaring actors and methods as "`distributable`"
 
+Naming of distributed actors has been debated and while it is true that `distributed` means "may be distributed (meaning 'remote') or not", this is not really the mindset we want to promote with distributed actors. The mental mindset should be that these are distributed and we must treat them this way, and they may happen to be local. Locality is the special case, distribution is the capability we're working with while designing location transparent actors. While we do envision the use of "known to be local" distributed actors, this is better solved with either a `worker.whenLocal { ...` API or allowing marking types with a `local` keyword - either approaches are not part of this proposal and will be pitched in dependently.
 
+The `distributed` keyword functions the same way as `async` on methods. Async methods are not always asynchronous. The `async` keyword merely means that such method _may suspend_. Similarly, a `distributed func` may or may not perform a remote call, as such the semantics follow the same "beware, the more expensive thing may happen" style of marking methods. 
 
 ### Unconditionally conforming `DistributedActor` to `Codable`
 
