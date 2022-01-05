@@ -330,7 +330,7 @@ protocol DistributedActor: AnyActor, Identifiable, Hashable
   ///
   /// It is responsible for assigning and managing the actor's id, 
   /// as well as delivering incoming messages as distributed method invocations on the actor.
-  nonisolated var actorSystem: DistributedActorSystem { get }
+  nonisolated var actorSystem: ActorSystem { get }
 }
 ```
 
